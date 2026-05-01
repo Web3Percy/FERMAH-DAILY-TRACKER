@@ -9,11 +9,57 @@ const DAILY_TASKS = [
   { id: 'engage', label: 'Engage with 3+ Posts', icon: '🤝' },
 ];
 
+// Gets pure local date (YYYY-MM-DD) avoiding UTC timezone bugs
+const getLocalToday = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
 export default function FermahTracker() {
   const [completedTasks, setCompletedTasks] = useState<Record<string, boolean>>({});
   const [currentStreak, setCurrentStreak] = useState(0);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
-  const [hydrated, setHydrated] = useState(false); 
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    // Theme Setup
+    const storedTheme = localStorage.getItem('fermah-theme') as 'light' | 'dark' | null;
+    if (storedTheme) {
+      setTheme(storedTheme);
+      if (storedTheme === 'dark') document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.add('dark');
+    }
+
+    // ATOMIC DATA LOAD: One single file for all data to prevent sync bugs
+    const today = getLocalToday();
+    const dataStr = localStorage.getItem('fermah-data');
+    let data = dataStr ? JSON.parse(dataStr) : { lastCheckIn: '', tasks: {}, streak: 0, lastStreakDate: '' };
+
+    if (data.lastCheckIn !== today) {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+
+      const allDoneYesterday = DAILY_TASKS.every(task => data.tasks[task.id]);
+
+      if (data.lastCheckIn === yesterdayStr && allDoneYesterday) {
+        // Streak continues
+      } else {
+        // Streak broken
+        data.streak = 0;
+      }
+
+      // Reset for the new day
+      data.tasks = {};
+      data.lastCheckIn = today;
+      localStorage.setItem('fermah-data', JSON.stringify(data));
+    }
+
+    setCompletedTasks(data.tasks);
+    setCurrentStreak(data.streak);
+    setHydrated(true);
+  }, []);
 
   const toggleTheme = () => {
     const newTheme = theme === 'light' ? 'dark' : 'light';
@@ -22,73 +68,28 @@ export default function FermahTracker() {
     localStorage.setItem('fermah-theme', newTheme);
   };
 
-  useEffect(() => {
-    const storedTheme = localStorage.getItem('fermah-theme') as 'light' | 'dark' | null;
-    if (storedTheme) {
-      setTheme(storedTheme);
-      if (storedTheme === 'dark') document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.add('dark'); 
-    }
-
-    const storedTasks = localStorage.getItem('fermah-completed-tasks');
-    const storedStreak = localStorage.getItem('fermah-streak');
-    const storedDate = localStorage.getItem('fermah-last-checkin');
-    
-    const todayString = new Date().toISOString().split('T')[0];
-
-    if (storedDate === todayString) {
-      if (storedTasks) setCompletedTasks(JSON.parse(storedTasks));
-      if (storedStreak) setCurrentStreak(parseInt(storedStreak, 10));
-    } else if (storedDate) {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayString = yesterday.toISOString().split('T')[0];
-
-      const yesterdayTasks = JSON.parse(storedTasks || '{}');
-      const allDoneYesterday = DAILY_TASKS.every(task => yesterdayTasks[task.id]);
-
-      if (storedDate === yesterdayString && allDoneYesterday) {
-        if (storedStreak) setCurrentStreak(parseInt(storedStreak, 10));
-      } else {
-        setCurrentStreak(0);
-        localStorage.setItem('fermah-streak', '0');
-      }
-
-      setCompletedTasks({});
-      localStorage.setItem('fermah-completed-tasks', JSON.stringify({}));
-      localStorage.setItem('fermah-last-checkin', todayString);
-    } else {
-      localStorage.setItem('fermah-last-checkin', todayString);
-    }
-
-    setHydrated(true); 
-  }, []);
-
   const handleToggleTask = (taskId: string) => {
-    // THE STRICT LOCK: If the task is already checked, stop the function immediately.
-    if (completedTasks[taskId]) return;
+    if (completedTasks[taskId]) return; // Strict lock logic
 
-    setCompletedTasks(prev => {
-      const newTasks = { ...prev, [taskId]: true }; // Force it to true only
-      localStorage.setItem('fermah-completed-tasks', JSON.stringify(newTasks));
+    const today = getLocalToday();
+    const dataStr = localStorage.getItem('fermah-data');
+    let data = dataStr ? JSON.parse(dataStr) : { lastCheckIn: today, tasks: {}, streak: 0, lastStreakDate: '' };
 
-      const todayFinished = DAILY_TASKS.every(task => newTasks[task.id]);
-      const todayString = new Date().toISOString().split('T')[0];
-      const lastStreakDate = localStorage.getItem('fermah-last-streak-date');
+    // Update the specific task
+    data.tasks[taskId] = true;
+    setCompletedTasks(data.tasks);
 
-      if (todayFinished && lastStreakDate !== todayString) {
-        // Lock it in for today
-        setCurrentStreak(s => {
-          const newStreak = s + 1;
-          localStorage.setItem('fermah-streak', newStreak.toString());
-          return newStreak;
-        });
-        localStorage.setItem('fermah-last-streak-date', todayString);
-      } 
+    // Verify if all tasks are complete
+    const todayFinished = DAILY_TASKS.every(task => data.tasks[task.id]);
 
-      return newTasks;
-    });
+    if (todayFinished && data.lastStreakDate !== today) {
+      data.streak += 1;
+      data.lastStreakDate = today;
+      setCurrentStreak(data.streak);
+    }
+
+    // Save atomic state
+    localStorage.setItem('fermah-data', JSON.stringify(data));
   };
 
   const FermahLogoPi = ({ className = 'w-10 h-10' }) => (
@@ -164,35 +165,33 @@ export default function FermahTracker() {
                       className={`flex items-center gap-5 p-5 rounded-2xl bg-slate-100 dark:bg-slate-950 border transition ${
                         isChecked 
                           ? 'border-[#00C49F]/50 opacity-80' 
-                          : 'border-slate-200 dark:border-slate-800 hover:border-[#00C49F]/30'
+                          : 'border-slate-200 dark:border-slate-800'
                       }`}
                     >
-                      <div className={`text-3xl ${isChecked ? 'grayscale' : ''}`}>{task.icon}</div>
+                      <div className={`text-3xl ${isChecked ? 'grayscale opacity-50' : ''}`}>{task.icon}</div>
 
                       <label 
-                        htmlFor={task.id} 
-                        className={`flex-grow text-lg font-medium ${isChecked ? 'text-slate-500 line-through cursor-not-allowed' : 'cursor-pointer'}`}
+                        className={`flex-grow text-lg font-medium ${isChecked ? 'text-slate-500 line-through' : ''}`}
                       >
                         {task.label}
                       </label>
 
-                      <div className="relative inline-block w-12 h-12 flex items-center justify-center">
-                        <input
-                          id={task.id}
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => handleToggleTask(task.id)}
-                          disabled={isChecked}
-                          className="peer sr-only"
-                        />
-                        <div className={`w-9 h-9 border-4 rounded-full transition group flex items-center justify-center ${
+                      {/* Rock-solid SVG checkmark button */}
+                      <button
+                        onClick={() => handleToggleTask(task.id)}
+                        disabled={isChecked}
+                        className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all ${
                           isChecked 
-                            ? 'border-[#00C49F] cursor-not-allowed' 
-                            : 'border-slate-300 dark:border-slate-700 peer-focus:ring-2 peer-focus:ring-[#00C49F]/30'
-                        }`}>
-                          <div className={`w-5 h-5 bg-transparent rounded-full transition duration-200 ${isChecked ? 'scale-100 bg-[#00C49F]' : 'scale-0'}`} />
-                        </div>
-                      </div>
+                            ? 'bg-[#00C49F] border-[#00C49F] cursor-not-allowed' 
+                            : 'border-slate-400 dark:border-slate-600 cursor-pointer'
+                        }`}
+                      >
+                        {isChecked && (
+                          <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </button>
                     </div>
                   );
                 })}
