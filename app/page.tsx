@@ -3,19 +3,35 @@
 import { useState, useEffect } from 'react';
 
 const DAILY_TASKS = [
-  { id: 'post', label: 'Post Content (X/Social)', icon: '📝' },
-  { id: 'discord', label: 'Check Discord (Community)', icon: '💬' },
-  { id: 'spotlight', label: 'Submit to Spotlight', icon: '🌟' },
-  { id: 'engage', label: 'Engage with 3+ Posts', icon: '🤝' },
+  { id: 'post', label: 'Post Content (X/Social)', icon: '📝', placeholder: 'https://x.com/yourhandle/status/...' },
+  { id: 'gm', label: 'Gm in Gm channel', icon: '💬', placeholder: 'https://discord.com/channels/1266746067265916978/1277635543034757130/...' },
+  { id: 'echo', label: 'The Official Echo', icon: '🔁', placeholder: 'https://x.com/yourhandle/status/...' },
 ];
 
+const WEEKLY_TASK = { 
+  id: 'spotlight', 
+  label: 'Submit to Spotlight', 
+  icon: '🌟', 
+  placeholder: 'https://discord.com/channels/1266746067265916978/1285714079087988797/...' 
+};
+
+// Utilities for Date Math
 const getLocalToday = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+const getMostRecentFriday = () => {
+  const d = new Date();
+  const dayOfWeek = d.getDay(); // Sun=0, Mon=1, ..., Fri=5, Sat=6
+  const daysToSubtract = (dayOfWeek + 2) % 7; 
+  d.setDate(d.getDate() - daysToSubtract);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
 export default function FermahTracker() {
-  const [completedTasks, setCompletedTasks] = useState<Record<string, boolean>>({});
+  const [completedDailyTasks, setCompletedDailyTasks] = useState<Record<string, boolean>>({});
+  const [spotlightDone, setSpotlightDone] = useState(false);
   const [currentStreak, setCurrentStreak] = useState(0);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [hydrated, setHydrated] = useState(false);
@@ -26,6 +42,7 @@ export default function FermahTracker() {
   const [verifyError, setVerifyError] = useState('');
 
   useEffect(() => {
+    // Theme setup
     const storedTheme = localStorage.getItem('fermah-theme') as 'light' | 'dark' | null;
     if (storedTheme) {
       setTheme(storedTheme);
@@ -35,28 +52,48 @@ export default function FermahTracker() {
     }
 
     const today = getLocalToday();
+    const currentFriday = getMostRecentFriday();
+    
     const dataStr = localStorage.getItem('fermah-data');
-    let data = dataStr ? JSON.parse(dataStr) : { lastCheckIn: '', tasks: {}, streak: 0, lastStreakDate: '' };
+    let data = dataStr ? JSON.parse(dataStr) : { 
+      lastCheckIn: '', 
+      dailyTasks: {}, 
+      spotlightDone: false,
+      currentCycle: currentFriday,
+      streak: 0, 
+      lastStreakDate: '' 
+    };
 
+    // 1. Weekly Boss Quest Check (The Friday Reset)
+    if (data.currentCycle !== currentFriday) {
+      if (!data.spotlightDone) {
+        data.streak = 0; // Burn streak if weekly quest was missed
+      }
+      data.currentCycle = currentFriday;
+      data.spotlightDone = false; // Reset the quest for the new week
+    }
+
+    // 2. Daily Grind Check
     if (data.lastCheckIn !== today) {
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
       const yesterdayStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
 
-      const allDoneYesterday = DAILY_TASKS.every(task => data.tasks[task.id]);
+      const allDoneYesterday = DAILY_TASKS.every(task => data.dailyTasks[task.id]);
 
       if (data.lastCheckIn === yesterdayStr && allDoneYesterday) {
-        // Streak continues
-      } else {
-        data.streak = 0;
+        // Streak survives the daily check
+      } else if (data.lastCheckIn !== '') {
+        data.streak = 0; // Burn streak if a day was skipped
       }
 
-      data.tasks = {};
+      data.dailyTasks = {};
       data.lastCheckIn = today;
-      localStorage.setItem('fermah-data', JSON.stringify(data));
     }
 
-    setCompletedTasks(data.tasks);
+    localStorage.setItem('fermah-data', JSON.stringify(data));
+    setCompletedDailyTasks(data.dailyTasks);
+    setSpotlightDone(data.spotlightDone);
     setCurrentStreak(data.streak);
     setHydrated(true);
   }, []);
@@ -68,8 +105,8 @@ export default function FermahTracker() {
     localStorage.setItem('fermah-theme', newTheme);
   };
 
-  const handleInitiateVerify = (taskId: string) => {
-    if (completedTasks[taskId]) return; 
+  const handleInitiateVerify = (taskId: string, isDone: boolean) => {
+    if (isDone) return; 
     if (verifyingTaskId === taskId) {
       setVerifyingTaskId(null);
       setVerifyError('');
@@ -81,12 +118,12 @@ export default function FermahTracker() {
   };
 
   const handleConfirmVerify = async (taskId: string) => {
-    if (taskId === 'post') {
+    // 1. X/Social Verifications
+    if (taskId === 'post' || taskId === 'echo') {
       if (!verifyUrl.includes('x.com') && !verifyUrl.includes('twitter.com')) {
         setVerifyError('Please paste a valid X/Twitter link.');
         return;
       }
-
       setIsVerifying(true);
       setVerifyError('');
       
@@ -96,53 +133,57 @@ export default function FermahTracker() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ url: verifyUrl })
         });
+        const responseData = await res.json();
         
-        const data = await res.json();
-        
-        if (data.success) {
-          finalizeTask(taskId);
+        if (responseData.success) {
+          finalizeTask(taskId, false);
         } else {
-          setVerifyError(data.error || 'Verification failed. Make sure the tweet is public.');
+          setVerifyError(responseData.error || 'Verification failed. Make sure the tweet is public.');
         }
       } catch (err) {
         setVerifyError('Network error connecting to verification server.');
       }
       setIsVerifying(false);
       
-    } else if (taskId === 'discord') {
-      // The Ultimate Content Channel Lock
-      const fermahServerId = '1266746067265916978';
-      const fermahContentChannelId = '1285714079087988797';
-      
-      if (!verifyUrl.includes(`discord.com/channels/${fermahServerId}/${fermahContentChannelId}/`)) {
-        setVerifyError('Invalid link. You must paste a message link from the designated content channel.');
+    // 2. Discord Verifications
+    } else if (taskId === 'gm') {
+      if (!verifyUrl.includes('discord.com/channels/1266746067265916978/1277635543034757130/')) {
+        setVerifyError('Invalid link. You must paste a message link from the GM channel.');
         return;
       }
-
       setIsVerifying(true);
       setVerifyError('');
-      
-      setTimeout(() => {
-        finalizeTask(taskId);
-        setIsVerifying(false);
-      }, 600);
+      setTimeout(() => { finalizeTask(taskId, false); setIsVerifying(false); }, 600);
 
-    } else {
-      finalizeTask(taskId);
+    } else if (taskId === 'spotlight') {
+      if (!verifyUrl.includes('discord.com/channels/1266746067265916978/1285714079087988797/')) {
+        setVerifyError('Invalid link. You must paste a message link from the designated Spotlight channel.');
+        return;
+      }
+      setIsVerifying(true);
+      setVerifyError('');
+      setTimeout(() => { finalizeTask(taskId, true); setIsVerifying(false); }, 600);
     }
   };
 
-  const finalizeTask = (taskId: string) => {
+  const finalizeTask = (taskId: string, isWeekly: boolean) => {
     const today = getLocalToday();
     const dataStr = localStorage.getItem('fermah-data');
-    let data = dataStr ? JSON.parse(dataStr) : { lastCheckIn: today, tasks: {}, streak: 0, lastStreakDate: '' };
+    let data = dataStr ? JSON.parse(dataStr) : null;
+    if (!data) return;
 
-    data.tasks[taskId] = true;
-    setCompletedTasks(data.tasks);
+    if (isWeekly) {
+      data.spotlightDone = true;
+      setSpotlightDone(true);
+    } else {
+      data.dailyTasks[taskId] = true;
+      setCompletedDailyTasks(data.dailyTasks);
+    }
 
-    const todayFinished = DAILY_TASKS.every(task => data.tasks[task.id]);
+    // Evaluate Streak ONLY based on daily tasks being done
+    const allDailyDone = DAILY_TASKS.every(task => data.dailyTasks[task.id]);
 
-    if (todayFinished && data.lastStreakDate !== today) {
+    if (allDailyDone && data.lastStreakDate !== today) {
       data.streak += 1;
       data.lastStreakDate = today;
       setCurrentStreak(data.streak);
@@ -163,7 +204,7 @@ export default function FermahTracker() {
     </svg>
   );
 
-  const allTasksDone = hydrated && DAILY_TASKS.every(task => completedTasks[task.id]);
+  const allDailyTasksDone = hydrated && DAILY_TASKS.every(task => completedDailyTasks[task.id]);
 
   return (
     <div className={`${theme} min-h-screen font-sans`}>
@@ -172,7 +213,7 @@ export default function FermahTracker() {
           <div className="flex items-center gap-4">
             <FermahLogoPi className="w-12 h-12" />
             <h1 className="text-2xl md:text-3xl font-bold tracking-tighter">
-              Fermah <span className="text-sm font-medium text-slate-500 dark:text-slate-500">Daily Tracker</span>
+              Fermah <span className="text-sm font-medium text-slate-500 dark:text-slate-500">Terminal</span>
             </h1>
           </div>
           <button
@@ -187,101 +228,149 @@ export default function FermahTracker() {
           {hydrated && (
             <section className="bg-white dark:bg-slate-900 p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6 text-center md:text-left">
               <div>
-                <h2 className="text-lg font-semibold text-slate-500 dark:text-slate-400">Current Ecosystem Streak</h2>
+                <h2 className="text-lg font-semibold text-slate-500 dark:text-slate-400">Ecosystem Streak</h2>
                 <div className="flex items-center justify-center md:justify-start gap-4">
-                    <p className={`text-6xl md:text-7xl font-extrabold tracking-tighter ${allTasksDone ? 'text-[#00C49F]' : ''}`}>
+                    <p className={`text-6xl md:text-7xl font-extrabold tracking-tighter ${allDailyTasksDone ? 'text-[#00C49F]' : ''}`}>
                     🔥 {currentStreak} Days
                     </p>
                 </div>
               </div>
-              {allTasksDone ? (
+              {allDailyTasksDone ? (
                 <div className="bg-[#00C49F]/10 text-[#00C49F] px-5 py-3 rounded-xl font-bold border border-[#00C49F]/30 flex items-center gap-2">
-                  <span>✅</span> Perfect Day Complete!
+                  <span>✅</span> Daily Grid Complete
                 </div>
               ) : (
                 <p className="text-slate-600 dark:text-slate-300 max-w-sm text-sm">
-                  Complete all tasks today to extend your streak. Don’t miss a day or the ecosystem resets!
+                  Lock in your daily tasks to extend the streak. Complete the Boss Quest before Friday or the streak burns.
                 </p>
               )}
             </section>
           )}
 
           {hydrated && (
-            <section className="bg-white dark:bg-slate-900 p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-lg">
-              <div className="flex items-center justify-between mb-8">
-                <h3 className="text-xl font-bold tracking-tight">Today’s Fermah Blueprint</h3>
-                <span className="text-sm font-medium text-slate-400 dark:text-slate-600">
-                  {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
-                </span>
-              </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {/* DAILY GRIND SECTION */}
+              <section className="bg-white dark:bg-slate-900 p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-lg">
+                <div className="flex items-center justify-between mb-8">
+                  <h3 className="text-xl font-bold tracking-tight">The Daily Grind</h3>
+                </div>
 
-              <div className="space-y-4">
-                {DAILY_TASKS.map((task) => {
-                  const isChecked = completedTasks[task.id] || false;
-                  const isVerifyingThis = verifyingTaskId === task.id;
-                  
-                  return (
-                    <div key={task.id} className="flex flex-col gap-2">
-                      <div
-                        onClick={() => handleInitiateVerify(task.id)}
-                        className={`flex items-center gap-5 p-5 rounded-2xl bg-slate-100 dark:bg-slate-950 border transition cursor-pointer ${
-                          isChecked 
-                            ? 'border-[#00C49F]/50 opacity-80 cursor-not-allowed' 
-                            : 'border-slate-200 dark:border-slate-800 hover:border-[#00C49F]/50'
-                        }`}
-                      >
-                        <div className={`text-3xl ${isChecked ? 'grayscale opacity-50' : ''}`}>{task.icon}</div>
-
-                        <label className={`flex-grow text-lg font-medium cursor-pointer ${isChecked ? 'text-slate-500 line-through' : ''}`}>
-                          {task.label}
-                        </label>
-
-                        <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all ${
-                            isChecked ? 'bg-[#00C49F] border-[#00C49F]' : 'border-slate-400 dark:border-slate-600'
+                <div className="space-y-4">
+                  {DAILY_TASKS.map((task) => {
+                    const isChecked = completedDailyTasks[task.id] || false;
+                    const isVerifyingThis = verifyingTaskId === task.id;
+                    
+                    return (
+                      <div key={task.id} className="flex flex-col gap-2">
+                        <div
+                          onClick={() => handleInitiateVerify(task.id, isChecked)}
+                          className={`flex items-center gap-5 p-5 rounded-2xl bg-slate-100 dark:bg-slate-950 border transition cursor-pointer ${
+                            isChecked 
+                              ? 'border-[#00C49F]/50 opacity-80 cursor-not-allowed' 
+                              : 'border-slate-200 dark:border-slate-800 hover:border-[#00C49F]/50'
                           }`}
                         >
-                          {isChecked && (
-                            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                            </svg>
-                          )}
+                          <div className={`text-3xl ${isChecked ? 'grayscale opacity-50' : ''}`}>{task.icon}</div>
+                          <label className={`flex-grow text-lg font-medium cursor-pointer ${isChecked ? 'text-slate-500 line-through' : ''}`}>
+                            {task.label}
+                          </label>
+                          <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all ${
+                              isChecked ? 'bg-[#00C49F] border-[#00C49F]' : 'border-slate-400 dark:border-slate-600'
+                            }`}
+                          >
+                            {isChecked && (
+                              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </div>
                         </div>
-                      </div>
 
-                      {isVerifyingThis && !isChecked && (
-                        <div className="p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl ml-4 mr-4 flex flex-col gap-3 animate-in slide-in-from-top-2">
-                          <p className="text-sm text-slate-500 font-medium">
-                            {task.id === 'post' ? 'Paste the link to your X post to verify:' : 
-                             task.id === 'discord' ? 'Paste your Fermah Discord message link:' : 
-                             'Mark this task as complete?'}
-                          </p>
-                          
-                          {(task.id === 'post' || task.id === 'discord') && (
+                        {isVerifyingThis && !isChecked && (
+                          <div className="p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl ml-4 mr-4 flex flex-col gap-3">
+                            <p className="text-sm text-slate-500 font-medium">Paste your link to verify:</p>
                             <input 
                               type="url" 
-                              placeholder={task.id === 'post' ? "https://x.com/yourhandle/status/..." : "https://discord.com/channels/1266746067265916978/1285714079087988797/..."}
+                              placeholder={task.placeholder}
                               value={verifyUrl}
                               onChange={(e) => setVerifyUrl(e.target.value)}
                               className="w-full p-3 rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 focus:outline-none focus:border-[#00C49F] text-slate-900 dark:text-white"
                             />
-                          )}
+                            {verifyError && <p className="text-sm text-red-500 font-medium">{verifyError}</p>}
+                            <button 
+                              onClick={() => handleConfirmVerify(task.id)}
+                              disabled={isVerifying}
+                              className="bg-[#00C49F] text-slate-950 font-bold py-3 px-4 rounded-lg hover:bg-[#00b391] transition disabled:opacity-50"
+                            >
+                              {isVerifying ? 'Verifying...' : 'Confirm & Lock'}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
 
-                          {verifyError && <p className="text-sm text-red-500 font-medium">{verifyError}</p>}
-                          
-                          <button 
-                            onClick={() => handleConfirmVerify(task.id)}
-                            disabled={isVerifying}
-                            className="bg-[#00C49F] text-slate-950 font-bold py-3 px-4 rounded-lg hover:bg-[#00b391] transition disabled:opacity-50"
-                          >
-                            {isVerifying ? 'Verifying...' : 'Confirm & Lock'}
-                          </button>
-                        </div>
-                      )}
+              {/* WEEKLY BOSS QUEST SECTION */}
+              <section className="bg-slate-100 dark:bg-slate-900/50 p-8 rounded-3xl border-2 border-dashed border-slate-300 dark:border-slate-700">
+                <div className="flex items-center justify-between mb-8">
+                  <div>
+                    <h3 className="text-xl font-bold tracking-tight text-amber-500">Weekly Boss Quest</h3>
+                    <p className="text-sm text-slate-500 mt-1">Resets every Friday. Must complete to protect streak.</p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex flex-col gap-2">
+                    <div
+                      onClick={() => handleInitiateVerify(WEEKLY_TASK.id, spotlightDone)}
+                      className={`flex items-center gap-5 p-5 rounded-2xl bg-white dark:bg-slate-950 border shadow-sm transition cursor-pointer ${
+                        spotlightDone 
+                          ? 'border-amber-500/50 opacity-80 cursor-not-allowed' 
+                          : 'border-slate-300 dark:border-slate-600 hover:border-amber-500/50'
+                      }`}
+                    >
+                      <div className={`text-3xl ${spotlightDone ? 'grayscale opacity-50' : ''}`}>{WEEKLY_TASK.icon}</div>
+                      <label className={`flex-grow text-lg font-medium cursor-pointer ${spotlightDone ? 'text-slate-500 line-through' : ''}`}>
+                        {WEEKLY_TASK.label}
+                      </label>
+                      <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all ${
+                          spotlightDone ? 'bg-amber-500 border-amber-500' : 'border-slate-400 dark:border-slate-600'
+                        }`}
+                      >
+                        {spotlightDone && (
+                          <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
                     </div>
-                  );
-                })}
-              </div>
-            </section>
+
+                    {verifyingTaskId === WEEKLY_TASK.id && !spotlightDone && (
+                      <div className="p-4 bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl ml-4 mr-4 flex flex-col gap-3">
+                        <p className="text-sm text-slate-500 font-medium">Paste your Fermah Spotlight message link:</p>
+                        <input 
+                          type="url" 
+                          placeholder={WEEKLY_TASK.placeholder}
+                          value={verifyUrl}
+                          onChange={(e) => setVerifyUrl(e.target.value)}
+                          className="w-full p-3 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 focus:outline-none focus:border-amber-500 text-slate-900 dark:text-white"
+                        />
+                        {verifyError && <p className="text-sm text-red-500 font-medium">{verifyError}</p>}
+                        <button 
+                          onClick={() => handleConfirmVerify(WEEKLY_TASK.id)}
+                          disabled={isVerifying}
+                          className="bg-amber-500 text-slate-950 font-bold py-3 px-4 rounded-lg hover:bg-amber-400 transition disabled:opacity-50"
+                        >
+                          {isVerifying ? 'Verifying...' : 'Submit Quest & Lock'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+            </div>
           )}
         </main>
       </div>
