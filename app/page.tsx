@@ -64,6 +64,11 @@ export default function FermahTracker() {
       lastStreakDate: '' 
     };
 
+    // BUG FIX: Upgrade old local storage data to the new format to prevent crash
+    if (!data.dailyTasks) data.dailyTasks = data.tasks || {};
+    if (data.spotlightDone === undefined) data.spotlightDone = false;
+    if (!data.currentCycle) data.currentCycle = currentFriday;
+
     // 1. Weekly Boss Quest Check (The Friday Reset)
     if (data.currentCycle !== currentFriday) {
       if (!data.spotlightDone) {
@@ -204,7 +209,7 @@ export default function FermahTracker() {
     </svg>
   );
 
-  const allDailyTasksDone = hydrated && DAILY_TASKS.every(task => completedDailyTasks[task.id]);
+  const allDailyTasksDone = hydrated && DAILY_TASKS.every(task => completedDailyTasks && completedDailyTasks[task.id]);
 
   return (
     <div className={`${theme} min-h-screen font-sans`}>
@@ -257,7 +262,7 @@ export default function FermahTracker() {
 
                 <div className="space-y-4">
                   {DAILY_TASKS.map((task) => {
-                    const isChecked = completedDailyTasks[task.id] || false;
+                    const isChecked = completedDailyTasks && completedDailyTasks[task.id] || false;
                     const isVerifyingThis = verifyingTaskId === task.id;
                     
                     return (
