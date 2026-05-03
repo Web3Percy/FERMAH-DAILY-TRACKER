@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react';
 const DAILY_TASKS = [
   { id: 'post', label: 'Post Content (X/Social)', icon: '📝', placeholder: 'https://x.com/yourhandle/status/...' },
   { id: 'gm', label: 'Gm in Gm channel', icon: '💬', placeholder: 'https://discord.com/channels/1266746067265916978/1277635543034757130/...' },
-  { id: 'echo', label: 'The Official Echo', icon: '🔁', placeholder: 'https://x.com/yourhandle/status/...' },
+  { id: 'echo', label: 'The Daily Raid', icon: '🔁', placeholder: 'https://x.com/yourhandle/status/...' },
 ];
 
 const WEEKLY_TASK = { 
@@ -46,7 +46,11 @@ export default function FermahTracker() {
     const storedTheme = localStorage.getItem('fermah-theme') as 'light' | 'dark' | null;
     if (storedTheme) {
       setTheme(storedTheme);
-      if (storedTheme === 'dark') document.documentElement.classList.add('dark');
+      if (storedTheme === 'dark') {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
     } else {
       document.documentElement.classList.add('dark');
     }
@@ -106,7 +110,11 @@ export default function FermahTracker() {
   const toggleTheme = () => {
     const newTheme = theme === 'light' ? 'dark' : 'light';
     setTheme(newTheme);
-    document.documentElement.classList.toggle('dark');
+    if (newTheme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
     localStorage.setItem('fermah-theme', newTheme);
   };
 
